@@ -1,0 +1,276 @@
+;------------------------------------------------------------------------------------------
+                    ; Port definitions
+                    ;------------------------------------------------------------------------------------------
+                    ;
+                    ; The only I/O ports used in this design are those that interface with the UART macros.
+                    ; CONSTANT directives defining the port addresses and the allocation of signals within
+                    ; those ports are defined in 'uart_interface_routines.psm'.
+                    ;
+                    ;
+                    ;------------------------------------------------------------------------------------------
+                    ; Special Register usage
+                    ;------------------------------------------------------------------------------------------
+                    ;
+                    ; No registers are given special names in this program.
+                    ;
+                    ;------------------------------------------------------------------------------------------
+                    ; Scratch Pad Memory Locations
+                    ;------------------------------------------------------------------------------------------
+                    ;
+                    CONSTANT hex_value0, 00         ;16-bit value (lower byte)
+                    CONSTANT hex_value1, 01         ;16-bit value (upper byte)
+                    ;
+                    CONSTANT decimal0, 02           ;5 digit decimal value
+                    CONSTANT decimal1, 03           ;  Suitable for 16-bit values up to
+                    CONSTANT decimal2, 04           ;   65,536
+                    CONSTANT decimal3, 05
+                    CONSTANT decimal4, 06
+                    ;
+                    ;
+                    ;------------------------------------------------------------------------------------------
+                    ; Useful data constants
+                    ;------------------------------------------------------------------------------------------
+                    ;
+                    CONSTANT input_port, 05
+                    CONSTANT output_port, 04
+                    ;
+                    ;
+                    ;------------------------------------------------------------------------------------------
+                    ; Initialise the system
+                    ;------------------------------------------------------------------------------------------
+                    ;
+                    ; A delay of 1 second is implemented which is intended to give time for all the hardware
+                    ; to settle into a stable condition before starting to doing anything. This can be
+                    ; particularly beneficial when dealing with long cables where serial lines can take some
+                    ; time to reach the initial idle state following power being applied.
+                    ;
+        ;cold_start: CALL delay_1s                   ;
+                    ;
+                    CALL reset_UART_macros          ;Reset buffers in UART macros
+                    ;
+                    ;
+                    ; Initialised terminal display and display welcome messages
+                    ;
+                     ;------------------------------------------------------------------------------------------
+                    ; Main Program
+                    ;------------------------------------------------------------------------------------------
+                    ;
+                    ;
+        value_input1:CALL UART_RX
+                      JUMP Z,value_input1
+                      CALL ASCII_to_hex
+                       ADD s2,s5
+                       LOAD sB, 4'd                      ;shift [sD,sC,sB,sA] left by 4 bits
+         build_input: SL0 s2                            ;  to make space for new digit value
+                       SUB sB, 1'd
+                      JUMP NZ, build_input
+          value_input2:CALL UART_RX
+                      JUMP Z,value_input2
+                      CALL ASCII_to_hex
+                       ADD s2,s5
+                       
+                      OUTPUT s2, 04
+                   
+             ;input:INPUT s4, 05
+
+ ;                  CALL send_hex_byte
+                   CALL send_space
+                JUMP value_input1
+                      
+                    
+                      ;------------------------------------------------------------------------------------------
+                      ; Converts character to upper case
+                      ;------------------------------------------------------------------------------------------
+                      ;
+                      ; Tests and converts character in 's5' (if necessary).
+                      ;
+                      ; To convert character to upper case
+                      ;
+                      ; If the character is in the range 'a' to 'z', it is converted
+                      ; to the equivalent upper case character in the range 'A' to 'Z'.
+                      ; All other characters remain unchanged.
+                      ;
+          upper_case: COMPARE s5, "a"                   ;eliminate character codes below 'a' (61 hex)
+                      RETURN C
+                      COMPARE s5, 7B                    ;eliminate character codes above 'z' (7A hex)
+                      RETURN NC
+                      AND s5, 11011111'b                ;force bit5 Low to convert to upper case
+                      RETURN 
+                      ;
+                      ;
+                       ;------------------------------------------------------------------------------------------
+                      ; Obtain 24-bit address from user
+                      ;------------------------------------------------------------------------------------------
+                      ;
+   obtain_address: LOAD sE, 6'd                      ;obtain 6-digit value
+                      CALL obtain_value                 ;24-bit value returned in [sC,sB,sA]
+                     LOAD s9, sC                       ;return address in [s9,s8,s7]
+                      LOAD s8, sB
+                      LOAD s7, sA
+                      RETURN 
+                      ;
+                      ;------------------------------------------------------------------------------------------
+                      ; Send Hex Value of Byte to UART
+                      ;------------------------------------------------------------------------------------------
+                      ;
+                      ; Value provided in register 's4' is sent as ASCII HEX to the UART transmitter.
+                      ;
+                      ; Registers used s0, s4 (preserved) and s5.
+                      ;
+       send_hex_byte: LOAD s5, s4                       ;isolate upper nibble
+                      SR0 s5
+                      SR0 s5
+                      SR0 s5
+                      SR0 s5
+                      CALL hex_to_ASCII                 ; convert to ASCII
+                      CALL UART_TX                      ;send upper digit to UART
+                      LOAD s5, s4                       ;isolate lower nibble
+                      AND s5, 0F
+                      CALL hex_to_ASCII                 ; convert to ASCII
+                      CALL UART_TX                      ;send lower digit to UART
+                      RETURN 
+                      ;
+                      ; Convert value 00 to 0F provided in 's5' into ASCII character in 's5'
+                      ;
+                      ; Register used s5
+                      ;
+        hex_to_ASCII: SUB s5, 0A                        ;test if value is in range 0 to 9
+                      JUMP C, number_char
+                      ADD s5, 07                        ;ASCII char A to F in range 41 to 46
+         number_char: ADD s5, 3A                        ;ASCII char 0 to 9 in range 30 to 40
+                      RETURN 
+                      ;
+                      ;
+                      ;------------------------------------------------------------------------------------------
+                      ; Convert ASCII character to an equivalent HEX value.
+                      ;------------------------------------------------------------------------------------------
+                      ;
+                      ; Converts the ASCII character presented in 's5' to an equivalent HEX value.
+                      ; If character is not valid for hex, then CARRY is set on return.
+                      ;
+                      ; Register used s5
+                      ;
+        ASCII_to_hex: ADD s5, B9                        ;test for above ASCII code 46 ('F')
+                      RETURN C
+                      SUB s5, E9                        ;normalise 0 to 9 with A-F in 11 to 16 hex
+                      RETURN C                          ;reject below ASCII code 30 ('0')
+                      SUB s5, 11                        ;isolate A-F down to 00 to 05 hex
+                      JUMP NC, ASCII_letter
+                      ADD s5, 07                        ;test for above ASCII code 46 ('F')
+                      RETURN C
+                      SUB s5, F6                        ;convert to range 00 to 09
+                      RETURN 
+        ASCII_letter: ADD s5, 0A                        ;convert to range 0A to 0F
+                      RETURN 
+                      ;
+                      ;
+                      ;------------------------------------------------------------------------------------------
+                      ; Read ASCII-HEX value up to 8-digits (for 32-bit value) from UART
+                      ;------------------------------------------------------------------------------------------
+                      ;
+                      ; Read up to 8 hex characters from UART and convert to a binary value in the [sD,sC,sB,sA]
+                      ; register set. The number of characters to be read must be defined in sE. When less than
+                      ; 8 characters are read the value is returned in the least significant bits of the register
+                      ; set with the 8-bits above the defined value being zero to ensure ensuring that the upper
+                      ; nibble will be zero if an odd number of digits are read.
+                      ;
+                      ; If any character received from the UART is not in the range 0 to F then the routine will
+                      ; end immediately with the CARRY flag set and this should be checked my the calling process
+                      ; upon return.
+                      ;
+        obtain_value: LOAD sA, 00                       ;initialise potentially unused bits to zero
+        obtain_digit: CALL UART_RX                      ;wait for a character and return in s5
+                      JUMP Z, obtain_digit              ;continue to wait if timeout occurs
+                      CALL UART_TX                      ;echo character as entered
+                      CALL upper_case                   ;convert to upper case if necessary
+                      CALL ASCII_to_hex                 ;convert value in s5 to hex nibble
+                      RETURN C                          ;If invalid hex digit then return immediately
+                      LOAD s0, 4'd                      ;shift [sD,sC,sB,sA] left by 4 bits
+         build_value: SL0 sA                            ;  to make space for new digit value
+                      SLA sB
+                      SLA sC
+                      SLA sD
+                      SUB s0, 1'd
+                      JUMP NZ, build_value
+                      OR sA, s5                         ;merge value of new digit into existing value
+                      SUB sE, 01                        ;count number of digits obtained
+                      JUMP NZ, obtain_digit
+                      RETURN 
+                      ;
+                      ;
+                     ;------------------------------------------------------------------------------------------
+                    ; Send a message to the UART
+                    ;------------------------------------------------------------------------------------------
+                    ;
+                    ; A message is transmitted to the USB-UART.
+                    ; The start address of the message must be provided in [sB,sA].
+                    ; Terminate the transmission with a NULL character (00 hex).
+                    ;
+      send_message: CALL@ (sB, sA)
+                    COMPARE s5, 00                  ;terminate on NUL character
+                    RETURN Z
+                    CALL UART_TX
+                    ADD sA, 1'd
+                    ADDCY sB, 0'd
+                    JUMP send_message
+                    ;
+                    ;
+                    
+                    ;------------------------------------------------------------------------------------------
+                    ; Send Carriage Return to UART
+                    ;------------------------------------------------------------------------------------------
+                    ;
+                    ; Registers used s0, s1, s2, and s5.
+                    ;
+           send_CR: LOAD s5, CR
+                    JUMP UART_TX                    ;includes RETURN
+                    ;
+                    ;
+                   
+                    ;------------------------------------------------------------------------------------------
+                    ; Send a Space to UART
+                    ;------------------------------------------------------------------------------------------
+                    ;
+                    ; Registers used s0, s1, s2, and s5.
+                    ;
+        send_space: LOAD s5, " "
+                    JUMP UART_TX                    ;includes RETURN
+                    ;
+                    ;--------------------------------------------------------------------------------------
+                         ; Routines to transmit 'DCS' and 'ST' characters
+                         ;--------------------------------------------------------------------------------------
+                         ;
+                         ; Registers used s0 and s5.
+                         ;
+                         ; 'DCS' (90 hex = 144).
+                         ;
+               send_DCS: LOAD s5, DCS
+                         JUMP UART_TX                              ;includes RETURN
+                         ;
+                         ; 'ST' (9C hex = 156).
+                         ;
+                send_ST: LOAD s5, ST
+                         JUMP UART_TX                              ;includes RETURN
+                         ;
+                         ;
+                         ;
+                    ;------------------------------------------------------------------------------------------
+                    ; Include PSM files
+                    ;------------------------------------------------------------------------------------------
+                    ;
+                    ; The INCLUDE directive enables commonly routines to be kept in their own PSM files and
+                    ; easily reused in different programs (i.e. avoiding 'cut and paste'). It also allows
+                    ; each PSM to remain a more manageable size.
+                    ;
+                    ;
+                    ; Include routines that implement interface with UART macros.
+                    ; -----------------------------------------------------------
+                    ;
+                    INCLUDE "uart_interface_routines.psm"
+                    ;
+                    ;
+                     INCLUDE "soft_delays_100mhz.psm"
+                    ;------------------------------------------------------------------------------------------
+                    ; End of Program
+                    ;------------------------------------------------------------------------------------------
+                    ;

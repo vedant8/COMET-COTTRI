@@ -1,0 +1,1179 @@
+                    ;------------------------------------------------------------------------------------------
+                    ; Port definitions
+                    ;------------------------------------------------------------------------------------------
+                    ;
+                    ; The only I/O ports used in this design are those that interface with the UART macros.
+                    ; CONSTANT directives defining the port addresses and the allocation of signals within
+                    ; those ports are defined in 'uart_interface_routines.psm'.
+                    ;
+                    ;
+                    ;------------------------------------------------------------------------------------------
+                    ; Special Register usage
+                    ;------------------------------------------------------------------------------------------
+                    ;
+                    ; No registers are given special names in this program.
+                    ;
+                    ;------------------------------------------------------------------------------------------
+                    ; Scratch Pad Memory Locations
+                    ;------------------------------------------------------------------------------------------
+                    ;
+                    CONSTANT hex_value0, 00         ;16-bit value (lower byte)
+                    CONSTANT hex_value1, 01         ;16-bit value (upper byte)
+                    ;
+                    CONSTANT decimal0, 02           ;5 digit decimal value
+                    CONSTANT decimal1, 03           ;  Suitable for 16-bit values up to
+                    CONSTANT decimal2, 04           ;   65,536
+                    CONSTANT decimal3, 05
+                    CONSTANT decimal4, 06
+                    ;
+                    ;
+                    ;------------------------------------------------------------------------------------------
+                    ; Useful data constants
+                    ;------------------------------------------------------------------------------------------
+                    ;
+                    CONSTANT input_port, 02           ;unused as of now, to be removed
+                    CONSTANT output_port, 03          ;unused as of now, to be removed
+                    CONSTANT flag, 04                 ;unused as of now, to be removed
+                    ;
+                    ;;------------------------------------------------------------------------------------------
+                      ; Initialise the system
+                      ;------------------------------------------------------------------------------------------
+                      ;
+                      ; A delay of 1 second is implemented which is intended to give time for all the hardware
+                      ; to settle into a stable condition before starting to doing anything. This can be
+                      ; particularly beneficial when dealing with long cables where serial lines can take some
+                      ; time to reach the initial idle state following power being applied.
+                      ;
+          cold_start: CALL delay_1s
+                      ;
+                      CALL reset_UART_macros            ;Reset buffers in UART macros
+                       ;
+                    CALL PicoTerm_CLS
+           
+                     CALL welcome_message
+                      ;
+                      ;
+                     ;------------------------------------------------------------------------------------------
+                      ; Confirm SPI communication with Micron/Numonyx N25Q128 device
+                      ;------------------------------------------------------------------------------------------
+                      CALL read_spi_flash_ID            ;Read Flash ID into ; [s9,s8,s7]
+                      LOAD s4, s9                       ; display response
+                      CALL send_hex_byte
+                      CALL send_space
+                      LOAD s4, s8
+                      CALL send_hex_byte
+                      CALL send_space
+                      LOAD s4, s7
+                      CALL send_hex_byte
+                      ;
+                      COMPARE s9, 20                    ;test for expected response
+                      COMPARECY s8, BA
+                      COMPARECY s7, 18
+                      JUMP Z, N25Q128_detected           ;evidently, this works but the Correct ID isn't displayed
+    N25Q128_detected: 
+                      ;
+                      ;
+                      ;------------------------------------------------------------------------------------------
+                      ; Main Program
+                      ;------------------------------------------------------------------------------------------
+                      ;
+                      ; The 'main' program allows the user to read, write and erase the N25Q128 device.
+                      ;
+                      ;   WARNING - You are responsible for your own actions!
+                      ;
+                      ;
+      main_with_menu: CALL display_menu
+                      ;
+                      ; Display prompt and wait for user input.
+                      ; Then test input for valid section and either invoke operation or display message.
+                      ;
+         main_prompt:CALL UART_RX                      ;wait for user input
+                      JUMP Z, main_prompt
+                      CALL upper_case                   ;accept upper or lower case inputs
+                      CALL UART_TX                      ;echo user input
+                      ;
+                      COMPARE s5, "H"                   ;Help
+                      JUMP Z, main_with_menu
+                      ;
+                      COMPARE s5, "R"                   ;Read Page
+                      JUMP Z, read_page_command
+                      ;
+                      COMPARE s5, "W"                   ;Write BBDT
+                      JUMP Z, write_byte_command
+                      ;
+                      COMPARE s5, "E"                   ;Erase Sector
+                      JUMP Z, erase_sector_command
+                      ;
+                      COMPARE s5, "D"                   ;Data Input
+                      JUMP Z, data_input_command
+                      ;
+                      COMPARE s5, "O"                   ;Data Output-write to timestamped file
+                      JUMP Z, data_output_command
+                      COMPARE s5, "L"                   ;LOOKUP-CHANMAP
+                      JUMP Z, lookup
+                      LOAD s5, "?"                      ;For all other inputs display ??
+                      CALL UART_TX
+                      CALL UART_TX
+                      JUMP main_prompt
+                      ;
+                      ;
+
+                       ;------------------------------------------------------------------------------------------
+                      ; 'R' Read Byte Command
+                      ;------------------------------------------------------------------------------------------
+                      ;
+                      ; Obtain a 24-bit address from the user and then read and display the byte of Flash
+                      ; memory in which that address is present.
+                      ;
+                      
+                      ; There are 256 Sectors formed of 256 pages. So in practical terms...
+                      ;       address[23:16] = Sector       (Register 's9')
+                      ;       address[15:9]  = Page         (Register 's8')
+                      ;       address[7:0]   = Byte         (Register 's7')
+                      ;
+   read_page_command: CALL obtain_address               ;24-bit address in [s9,s8,s7]
+                      LOAD s7, 00                       ;clear byte address for start of page
+                      CALL send_CR
+      read_line_loop: LOAD s6, 16'd                     ;16 bytes per line
+                      CALL send_CR
+                      LOAD s4, s9                       ;display 24-bit address
+                      CALL send_hex_byte
+                      LOAD s4, s8
+                      CALL send_hex_byte
+                      LOAD s4, s7
+                      CALL send_hex_byte
+                      CALL send_space
+                      CALL send_space
+                      CALL send_space
+      read_byte_loop: CALL read_spi_byte                ;read byte into 's2'
+                      LOAD s4, s2                       ;display byte
+                      CALL send_hex_byte
+                      CALL send_space
+                      ADD s7, 01                        ;count bytes
+                      JUMP C, end_read_SPI_page
+                      SUB s6, 1'd
+                      JUMP NZ, read_byte_loop
+                      JUMP read_line_loop
+                      ;
+   end_read_SPI_page: CALL send_CR
+          
+                      JUMP main_with_menu
+                      ;------------------------------------------------------------------------------------------
+                      ; 'W' Write Byte Command
+                      ;------------------------------------------------------------------------------------------
+write_byte_command:CALL send_CR
+                    ;CALL obtain_address               ;24-bit address in [s9,s8,s7]
+                    LOAD s9,163'd
+                    LOAD s8,0'd
+                    LOAD s7,0'd
+                    CALL erase_spi_sector                ;to ensure a clean write operation, it is prudent to ensure that the address has been erased
+                     ;CALL obtain_data                  ;8-bit data in s2
+                      ;
+          enter_text:CALL send_DCS                      ;initiates transfer of "picoreadfile.txt" by picoterm
+                     LOAD s5,"R"
+                     CALL UART_TX
+                     CALL send_ST
+          DCS_CHECK :CALL UART_RX                       ;PicoTerm initially sends a DCS string, or 144 decimal
+                      JUMP Z, DCS_CHECK
+                      COMPARE s5, 144'd
+                      JUMP NZ, DCS_CHECK
+            R_CHECK :CALL UART_RX                       ;followed by the character R
+                   JUMP Z, R_CHECK
+                      COMPARE s5, 82'd
+                      JUMP NZ, R_CHECK
+
+                
+               
+                  LOAD s6, 104'd                        ;nested loop, iterating over board
+              loop1: LOAD sA,64'd                       ;iterating over edep combinations
+        value_input01: LOAD s9,163'd                    ;edepl 2 bits
+                     LOAD s8,0'd
+                    LOAD s7,0'd
+                     CALL UART_RX
+                      JUMP Z,value_input01              ;wait for an input
+                      SUB s5, 48'd                      ; convert ASCII to Decimal
+                       ADD s7,s5                        ; Decimal value added to s7
+                       ADDCY s8,0'd
+                      SL0 s7                            ;  to make space for new digit value
+                      SLA s8
+          value_input02:CALL UART_RX
+                      JUMP Z,value_input02
+                      SUB s5, 48'd
+                       ADD s7,s5
+                       ADDCY s8,0'd
+                      SL0 s7                            ;  to make space for new digit value
+                      SLA s8
+         Space_CHECK01 :CALL UART_RX
+                   JUMP Z, Space_CHECK01
+                      COMPARE s5, 32'd
+                      JUMP NZ, Space_CHECK01
+
+        value_input03:CALL UART_RX                      ;edep 2 bits
+                      JUMP Z,value_input03
+                      SUB s5, 48'd
+                       ADD s7,s5
+                       ADDCY s8,0'd
+                      SL0 s7                            ;  to make space for new digit value
+                      SLA s8
+        value_input04:CALL UART_RX
+                      JUMP Z,value_input04
+                      SUB s5, 48'd
+                       ADD s7,s5
+                       ADDCY s8,0'd
+                      SL0 s7                            ;  to make space for new digit value
+                      SLA s8
+      Space_CHECK02 :CALL UART_RX
+                   JUMP Z, Space_CHECK02
+                      COMPARE s5, 32'd
+                      JUMP NZ, Space_CHECK02
+
+        value_input05:CALL UART_RX                      ;edepr 2 bits
+                      JUMP Z,value_input05
+                      SUB s5, 48'd
+                       ADD s7,s5
+                       ADDCY s8,0'd
+                      SL0 s7                            ;  to make space for new digit value
+                      SLA s8
+        value_input06:CALL UART_RX
+                      JUMP Z,value_input06
+                      SUB s5, 48'd
+                       ADD s7,s5
+                       ADDCY s8,0'd
+                      SL0 s7                            ;  to make space for new digit value
+                      SLA s8
+      Space_CHECK03 :CALL UART_RX
+                   JUMP Z, Space_CHECK03
+                      COMPARE s5, 32'd
+                      JUMP NZ, Space_CHECK03
+
+        value_input07:CALL UART_RX                     ; board id 7 bits
+                      JUMP Z,value_input07
+                      SUB s5, 48'd
+                       ADD s7,s5
+                       ADDCY s8,0'd
+                      SL0 s7                            ;  to make space for new digit value
+                      SLA s8
+        value_input08:CALL UART_RX
+                      JUMP Z,value_input08
+                      SUB s5, 48'd
+                       ADD s7,s5
+                       ADDCY s8,0'd
+                      SL0 s7                            ;  to make space for new digit value
+                      SLA s8
+        value_input09:CALL UART_RX
+                      JUMP Z,value_input09
+                      SUB s5, 48'd
+                       ADD s7,s5
+                       ADDCY s8,0'd
+                      SL0 s7                            ;  to make space for new digit value
+                      SLA s8
+        value_input10:CALL UART_RX
+                      JUMP Z,value_input10
+                      SUB s5, 48'd
+                       ADD s7,s5
+                       ADDCY s8,0'd
+                      SL0 s7                            ;  to make space for new digit value
+                      SLA s8
+         value_input11:CALL UART_RX
+                      JUMP Z,value_input11
+                      SUB s5, 48'd
+                       ADD s7,s5
+                       ADDCY s8,0'd
+                      SL0 s7                            ;  to make space for new digit value
+                      SLA s8
+        value_input12:CALL UART_RX
+                      JUMP Z,value_input12
+                      SUB s5, 48'd
+                       ADD s7,s5
+                       ADDCY s8,0'd
+                      SL0 s7                            ;  to make space for new digit value
+                      SLA s8
+        value_input13:CALL UART_RX
+                      JUMP Z,value_input13
+                      SUB s5, 48'd
+                       ADD s7,s5
+                       ADDCY s8,0'd
+      Space_CHECK04 :CALL UART_RX
+                   JUMP Z, Space_CHECK04
+                      COMPARE s5, 32'd
+                      JUMP NZ, Space_CHECK04
+
+        value_input14:CALL UART_RX                      ; Corresponding 8 bit weight
+                      JUMP Z,value_input14
+                      SUB s5, 48'd
+                       ADD s2,s5
+                       SL0 s2                            ;  to make space for new digit value
+                      
+         value_input15:CALL UART_RX
+                      JUMP Z,value_input15
+                      SUB s5, 48'd
+                       ADD s2,s5
+                       SL0 s2                            ;  to make space for new digit value
+                      
+        value_input16:CALL UART_RX
+                      JUMP Z,value_input16
+                      SUB s5, 48'd
+                       ADD s2,s5
+                       SL0 s2                            ;  to make space for new digit value
+                      
+        value_input17:CALL UART_RX
+                      JUMP Z,value_input17
+                      SUB s5, 48'd
+                       ADD s2,s5
+                        SL0 s2 
+         value_input18:CALL UART_RX
+                      JUMP Z,value_input18
+                      SUB s5, 48'd
+                       ADD s2,s5
+                       SL0 s2                            ;  to make space for new digit value
+                      
+         value_input19:CALL UART_RX
+                      JUMP Z,value_input19
+                      SUB s5, 48'd
+                       ADD s2,s5
+                       SL0 s2                            ;  to make space for new digit value
+                      
+        value_input20:CALL UART_RX
+                      JUMP Z,value_input20
+                      SUB s5, 48'd
+                       ADD s2,s5
+                       SL0 s2                            ;  to make space for new digit value
+                      
+        value_input21:CALL UART_RX
+                      JUMP Z,value_input21
+                      SUB s5, 48'd
+                       ADD s2,s5
+                       CALL write_spi_byte       
+          Space_CHECK :CALL UART_RX
+                   JUMP Z, Space_CHECK
+                      COMPARE s5, 32'd
+                      JUMP NZ, Space_CHECK
+                     SUB sA, 1'd
+                      JUMP NZ, value_input01
+                      SUB s6, 1'd
+                      JUMP NZ,loop1
+
+          ST_CHECK :CALL UART_RX
+                   JUMP Z, ST_CHECK
+                      COMPARE s5, 156'd
+                      JUMP NZ, ST_CHECK
+                   JUMP main_with_menu
+                      ;
+                      ;
+                      ;------------------------------------------------------------------------------------------
+                      ; 'E' Erase Sector Command
+                      ;------------------------------------------------------------------------------------------
+                      ;
+                      ; Obtain a 24-bit address from the user and then erase the sector in which that address
+                      ; falls. The N25Q128 memory is 16M-bytes and organised into 256 Sectors. Each Sector
+                      ; contains 256 Pages which in turn contain 256 Bytes. So in terms of the 24-bit address...
+                      ;
+                      ;       address[23:16] = Sector       (Register 's9')
+                      ;       address[15:9]  = Page         (Register 's8')
+                      ;       address[7:0]   = Byte         (Register 's7')
+                      ;
+                      ; Hence it is address[23:16] that defines the Sector that will be erased and will result
+                      ; in 65,536 bytes (64KB) being cleared to FF hex.
+                      ;
+erase_sector_command: CALL obtain_address               ;24-bit address in [s9,s8,s7]
+                      ;
+                      CALL erase_spi_sector             ;erase sector with address [s9,s8,s7]
+                      ;
+                      JUMP main_with_menu
+                      ;
+                      ;------------------------------------------------------------------------------------------
+                      ; 'D' DATA INPUT Command
+                      ;------------------------------------------------------------------------------------------
+data_input_command:CALL send_CR
+                    LOAD s9,162'd                     ;clearing output sector
+                    LOAD s8,0'd
+                    LOAD s7,0'd
+                    LOAD sE,0'd
+                    LOAD sF,0'd
+                    CALL erase_spi_sector
+                     
+           
+          enter_text2:CALL send_DCS                   ; this DCS string allows the user to input the file to be read, which should be in the same directory as picoterm 
+                     LOAD s5,"r"
+                     CALL UART_TX
+                     CALL send_ST
+          DCS_CHECK2 :CALL UART_RX
+                      JUMP Z, DCS_CHECK2
+                      COMPARE s5, 144'd
+                      JUMP NZ, DCS_CHECK2
+            R_CHECK2 :CALL UART_RX
+                   JUMP Z, R_CHECK2
+                      COMPARE s5,114'd
+                      JUMP NZ, R_CHECK2
+           
+                      LOAD s6,3'd
+        value_input1:CALL UART_RX
+                      JUMP Z,value_input1
+                      ; CALL UART_TX
+                      CALL ASCII_to_hex
+                       ADD s2,s5
+                       ADDCY s3,0'd
+
+                       LOAD sB, 4'd                      ;shift [sD,sC,sB,sA] left by 4 bits
+         build_input01: SL0 s2                            ;  to make space for new digit value
+                      SLA s3 
+                       SUB sB, 1'd
+                      JUMP NZ, build_input01
+
+        value_input2:CALL UART_RX
+                      JUMP Z,value_input2
+                      ; CALL UART_TX
+                    CALL ASCII_to_hex
+                       ADD s2,s5
+                       ADDCY s3,0'd
+                       
+                     
+                      LOAD sB, 4'd                      ;shift [sD,sC,sB,sA] left by 4 bits
+         build_input02: SL0 s2                            ;  to make space for new digit value
+                      SLA s3 
+                       SUB sB, 1'd
+                      JUMP NZ, build_input02
+  
+        value_input3:CALL UART_RX
+                      JUMP Z,value_input3
+                     ; CALL UART_TX
+                    CALL ASCII_to_hex
+                       ADD s2,s5
+                       ADDCY s3,0'd
+                      
+                      LOAD sB, 4'd                      ;shift [sD,sC,sB,sA] left by 4 bits
+         build_input03: SL0 s2                            ;  to make space for new digit value
+                      SLA s3 
+                       SUB sB, 1'd
+                      JUMP NZ, build_input03
+
+      value_input4:CALL UART_RX
+                      JUMP Z,value_input4
+                    CALL ASCII_to_hex
+                       ADD s2,s5
+                       ADDCY s3, 0'd
+                      LOAD s8,s3
+                       LOAD s7,s2
+                       LOAD sF,s3
+                       LOAD sE,s2
+
+                       LOAD sA,2'd
+               lookup1:SR0 s8
+                       SRA s7
+                       SUB sA, 1'd
+                       JUMP NZ, lookup1
+                       
+                       LOAD s9,160'd
+                       CALL read_spi_byte
+                       LOAD sB,s2
+                        LOAD s9,161'd
+                       CALL read_spi_byte
+                       LOAD sA,s2
+                       LOAD s8, sB
+                       LOAD s7, sA
+                       LOAD s9,164'd                               ;data is written to sectors 164 and 165
+                       LOAD s2,sF
+                       CALL write_spi_byte
+                       LOAD s9,165'd
+                       LOAD s2,sE
+                       CALL write_spi_byte
+
+        Space_CHECK4 :CALL UART_RX
+                   JUMP Z, Space_CHECK4
+                      COMPARE s5, 32'd
+                      JUMP NZ, Space_CHECK4
+                     SUB s6, 1'd
+                      JUMP NZ, value_input1
+
+          ST_CHECK2 :CALL UART_RX                                 ;data is processed after obtaining every signal as suitable analysis requires every cell to be read in sequence
+                   JUMP Z, ST_CHECK2
+                      COMPARE s5, 156'd
+                      JUMP NZ, ST_CHECK2
+
+                     
+                       LOAD s9,165'd                             ;data is quickly read from 165, as 164 simply contains board ids
+                      LOAD s8,0'd
+                      LOAD s7,0'd
+                      CALL read_spi_byte
+                      LOAD sC,s2
+                      LOAD s9,0'd
+                       LOAD sA, 2'd
+          left_deposit:SR0 sC
+                       SRA s9
+                       SUB sA, 1'd
+                       JUMP NZ, left_deposit
+                        LOAD sA, 2'd
+          addr_construct01:SL0 s9
+                         SLA s1
+                       SUB sA, 1'd
+                       JUMP NZ, addr_construct01
+
+                      LOAD s9,164'd
+                      ADD s7,1'd
+                      ADDCY s8,0'd
+                      CALL read_spi_byte
+                      LOAD sD,s2
+
+                       LOAD s9,165'd
+                      CALL read_spi_byte
+                      LOAD sC,s2
+                      LOAD s9,0'd
+                       LOAD sA, 2'd
+          centre_deposit:SR0 sC
+                       SRA s9
+                       SUB sA, 1'd
+                       JUMP NZ, centre_deposit
+                        LOAD sA, 2'd
+          addr_construct02:SL0 s9
+                         SLA s1
+                       SUB sA, 1'd
+                       JUMP NZ, addr_construct02
+                       ADD s7,1'd
+                      ADDCY s8,0'd
+
+                       LOAD s6,1'd                                     ;Loop over values
+                  bbdt:LOAD s9,165'd
+                       LOAD s5,s8
+                       LOAD s3,s7
+                      CALL read_spi_byte
+                      LOAD sC,s2
+                      LOAD s9,0'd
+                       LOAD sA, 2'd
+          right_deposit:SR0 sC
+                       SRA s9
+                       SUB sA, 1'd
+                       JUMP NZ, right_deposit
+                        LOAD sA, 2'd
+          addr_construct03:SL0 s9
+                         SLA s1
+                       SUB sA, 1'd
+                       JUMP NZ, addr_construct03
+                       LOAD s7,s1
+                       LOAD sC,sD
+                       LOAD sA,7'd
+                       SL0 sD
+              id_load:SL0 sD
+                      SLA s7
+                      SLA s8
+                      SUB sA,1'd
+                      JUMP NZ,id_load
+
+                      LOAD s9,163'd              ; BBDT lookup
+                      CALL read_spi_byte
+                      LOAD sB,s2
+                      LOAD s9,162'd
+                      LOAD s8,0'd
+                      LOAD s7,sC
+                      CALL read_spi_byte
+                      LOAD sE,s2
+                      ADD s7,128'd
+                      CALL read_spi_byte
+                      LOAD sF,s2
+                      ADD sF,sB                 ;Score Accumulator
+                      ADDCY sE,0'd
+                      LOAD s2,sF
+                      CALL write_spi_byte
+                       SUB s7,128'd
+                      LOAD s2,sE
+                      CALL write_spi_byte      ;value output in SECTOR A2
+
+                      LOAD s8,s5
+                      LOAD s7,s3
+                      LOAD s9,164'd
+                      CALL read_spi_byte       ;board id update
+                      LOAD sD,s2
+
+                      LOAD sA,4'd
+                reset_l:SL0 s1
+                      SUB sA,1'd
+                      JUMP NZ,reset_l
+                       LOAD sA,4'd
+                reset_r:SR0 s1
+                      SUB sA,1'd
+                      JUMP NZ,reset_r
+
+                       ADD s7,1'd
+                       ADDCY s8,0'd
+                      SUB s6,1'd
+                      JUMP NZ, bbdt
+
+
+
+
+              
+                   JUMP main_with_menu
+                      ;
+                      ;
+                      ;-------------------------------------------------------------------------------------------
+  data_output_command:LOAD s9,162'd                     ;After processing, this function is used to output timestamped data
+                      LOAD s8,0'd
+                      LOAD s7,0'd
+            open_log:CALL send_DCS
+                     LOAD s5,"W"
+                     CALL UART_TX
+                     CALL send_ST
+              readout:CALL read_spi_byte
+                      COMPARE s2, 255'd
+                      JUMP Z,close_log
+                      LOAD s4,s2
+                      CALL send_hex_byte
+                      CALL send_CR
+                      ADD s7,1'd
+                      ADDCY s8,0'd
+                      JUMP readout
+            close_log:CALL send_DCS
+                     LOAD s5,"w"
+                     CALL UART_TX
+                     CALL send_ST    
+                     JUMP main_with_menu
+                      ;-------------------------------------------------------------------------------------------
+            lookup:CALL send_CR                       ;Used to load the Channel Map Lookup Table. Sometimes glitches after reading the file, but the entry of the table into flash is stable and verified 
+                    LOAD s9,160'd
+                    LOAD s8,0'd
+                    LOAD s7,0'd
+                    LOAD sE,0'd
+                    LOAD sF,0'd
+                    CALL erase_spi_sector
+                    LOAD s9,161'd
+                    CALL erase_spi_sector
+
+        enter_text3:CALL send_DCS
+                     LOAD s5,"r"
+                     CALL UART_TX
+                     CALL send_ST
+          DCS_CHECK3 :CALL UART_RX
+                      JUMP Z, DCS_CHECK3
+                      COMPARE s5, 144'd
+                      JUMP NZ, DCS_CHECK3
+            R_CHECK3 :CALL UART_RX
+                   JUMP Z, R_CHECK3
+                      COMPARE s5,114'd
+                      JUMP NZ, R_CHECK3
+                      LOAD s4,64'd
+              loop2: LOAD s3, 78'd
+      value_input001:LOAD s8,0'd
+                    LOAD s7,0'd
+                    LOAD sE,0'd
+                    LOAD sF,0'd
+                      CALL UART_RX
+                      JUMP Z,value_input001
+                      SUB s5, 48'd
+                       ADD s7,s5
+                       ADDCY s8,0'd
+                      SL0 s7                            ;  to make space for new digit value
+                      SLA s8
+
+      value_input002:CALL UART_RX
+                      JUMP Z,value_input002
+                      SUB s5, 48'd
+                       ADD s7,s5
+                       ADDCY s8,0'd
+                      SL0 s7                            ;  to make space for new digit value
+                      SLA s8
+      value_input003:CALL UART_RX
+                      JUMP Z,value_input003
+                      SUB s5, 48'd
+                       ADD s7,s5
+                       ADDCY s8,0'd
+                      SL0 s7                            ;  to make space for new digit value
+                      SLA s8
+      value_input004:CALL UART_RX
+                      JUMP Z,value_input004
+                      SUB s5, 48'd
+                       ADD s7,s5
+                       ADDCY s8,0'd
+                      SL0 s7                            ;  to make space for new digit value
+                      SLA s8
+        value_input005:CALL UART_RX
+                      JUMP Z,value_input005
+                      SUB s5, 48'd
+                       ADD s7,s5
+                       ADDCY s8,0'd
+                      SL0 s7                            ;  to make space for new digit value
+                      SLA s8
+        value_input006:CALL UART_RX
+                      JUMP Z,value_input006
+                      SUB s5, 48'd
+                       ADD s7,s5
+                       ADDCY s8,0'd
+                      SL0 s7                            ;  to make space for new digit value
+                      SLA s8    
+         value_input007:CALL UART_RX
+                      JUMP Z,value_input007
+                      SUB s5, 48'd
+                       ADD s7,s5
+                       ADDCY s8,0'd
+                      SL0 s7                            ;  to make space for new digit value
+                      SLA s8    
+      Space_CHECK001 :CALL UART_RX
+                   JUMP Z, Space_CHECK001
+                      COMPARE s5, 32'd
+                      JUMP NZ, Space_CHECK001
+       value_input008:CALL UART_RX
+                      JUMP Z,value_input008
+                      SUB s5, 48'd
+                       ADD s7,s5
+                       ADDCY s8,0'd
+                      SL0 s7                            ;  to make space for new digit value
+                      SLA s8 
+      value_input009:CALL UART_RX
+                      JUMP Z,value_input009
+                      SUB s5, 48'd
+                       ADD s7,s5
+                       ADDCY s8,0'd
+                      SL0 s7                            ;  to make space for new digit value
+                      SLA s8 
+      value_input010:CALL UART_RX
+                      JUMP Z,value_input010
+                      SUB s5, 48'd
+                       ADD s7,s5
+                       ADDCY s8,0'd
+                      SL0 s7                            ;  to make space for new digit value
+                      SLA s8      
+      value_input011:CALL UART_RX
+                      JUMP Z,value_input011
+                      SUB s5, 48'd
+                       ADD s7,s5
+                       ADDCY s8,0'd
+                      SL0 s7                            ;  to make space for new digit value
+                      SLA s8       
+      value_input012:CALL UART_RX
+                      JUMP Z,value_input012
+                      SUB s5, 48'd
+                       ADD s7,s5
+                       ADDCY s8,0'd
+                      SL0 s7                            ;  to make space for new digit value
+                      SLA s8      
+       value_input013:CALL UART_RX
+                      JUMP Z,value_input013
+                      SUB s5, 48'd
+                       ADD s7,s5
+                       ADDCY s8,0'd
+          Space_CHECK002 :CALL UART_RX
+                   JUMP Z, Space_CHECK002
+                      COMPARE s5, 32'd
+                      JUMP NZ, Space_CHECK002  
+           value_input014:CALL UART_RX
+                      JUMP Z,value_input014
+                      SUB s5, 48'd
+                       ADD sE,s5
+                       ADDCY sF,0'd 
+                       SL0 sE                            ;  to make space for new digit value
+                      SLA sF   
+        value_input015:CALL UART_RX
+                      JUMP Z,value_input015
+                      SUB s5, 48'd
+                       ADD sE,s5
+                       ADDCY sF,0'd 
+                       SL0 sE                            ;  to make space for new digit value
+                      SLA sF 
+        value_input016:CALL UART_RX
+                      JUMP Z,value_input016
+                      SUB s5, 48'd
+                       ADD sE,s5
+                       ADDCY sF,0'd 
+                       SL0 sE                            ;  to make space for new digit value
+                      SLA sF   
+        value_input017:CALL UART_RX
+                      JUMP Z,value_input017
+                      SUB s5, 48'd
+                       ADD sE,s5
+                       ADDCY sF,0'd 
+                       SL0 sE                            ;  to make space for new digit value
+                      SLA sF      
+        value_input018:CALL UART_RX
+                      JUMP Z,value_input018
+                      SUB s5, 48'd
+                       ADD sE,s5
+                       ADDCY sF,0'd 
+                       SL0 sE                            ;  to make space for new digit value
+                      SLA sF
+        Space_CHECK003 :CALL UART_RX
+                   JUMP Z, Space_CHECK003
+                      COMPARE s5, 32'd
+                      JUMP NZ, Space_CHECK003
+        value_input019:CALL UART_RX
+                      JUMP Z,value_input019
+                      SUB s5, 48'd
+                       ADD sE,s5
+                       ADDCY sF,0'd 
+                       SL0 sE                            ;  to make space for new digit value
+                      SLA sF 
+         value_input020:CALL UART_RX
+                      JUMP Z,value_input020
+                      SUB s5, 48'd
+                       ADD sE,s5
+                       ADDCY sF,0'd 
+                       SL0 sE                            ;  to make space for new digit value
+                      SLA sF  
+         value_input021:CALL UART_RX
+                      JUMP Z,value_input021
+                      SUB s5, 48'd
+                       ADD sE,s5
+                       ADDCY sF,0'd 
+                       SL0 sE                            ;  to make space for new digit value
+                      SLA sF    
+         value_input022:CALL UART_RX
+                      JUMP Z,value_input022
+                      SUB s5, 48'd
+                       ADD sE,s5
+                       ADDCY sF,0'd 
+                       SL0 sE                            ;  to make space for new digit value
+                      SLA sF  
+      value_input023:CALL UART_RX
+                      JUMP Z,value_input023
+                      SUB s5, 48'd
+                       ADD sE,s5
+                       ADDCY sF,0'd 
+                       SL0 sE                            ;  to make space for new digit value
+                      SLA sF   
+       value_input024:CALL UART_RX
+                      JUMP Z,value_input024
+                      SUB s5, 48'd
+                       ADD sE,s5
+                       ADDCY sF,0'd 
+                       SL0 sE                            ;  to make space for new digit value
+                      SLA sF   
+       value_input025:CALL UART_RX
+                      JUMP Z,value_input025
+                      SUB s5, 48'd
+                       ADD sE,s5
+                       ADDCY sF,0'd 
+                       SL0 sE                            ;  to make space for new digit value
+                      SLA sF  
+        value_input026:CALL UART_RX
+                      JUMP Z,value_input026
+                      SUB s5, 48'd
+                       ADD sE,s5
+                       ADDCY sF,0'd 
+                       SL0 sE                            ;  to make space for new digit value
+                      SLA sF       
+        value_input027:CALL UART_RX
+                      JUMP Z,value_input027
+                      SUB s5, 48'd
+                       ADD sE,s5
+                       ADDCY sF,0'd
+
+    Space_CHECK004 :CALL UART_RX
+                   JUMP Z, Space_CHECK004
+                      COMPARE s5, 32'd
+                      JUMP NZ, Space_CHECK004
+                       LOAD s9,160'd
+                      LOAD s2,sF
+                      CALL write_spi_byte
+                      LOAD s9,161'd
+                      LOAD s2,sE
+                      CALL write_spi_byte  
+                      SUB s3,1'd
+                      JUMP NZ, value_input001
+                      SUB s4,1'd
+                     JUMP NZ,loop2
+
+
+          ST_CHECK3 :CALL UART_RX
+                       JUMP Z, ST_CHECK3
+                      COMPARE s5, 156'd
+                      JUMP NZ, ST_CHECK3
+
+                   JUMP main_with_menu                                                                                                                           
+                      ;------------------------------------------------------------------------------------------
+                      ; Obtain 8-bit data from user
+                      ;------------------------------------------------------------------------------------------
+                      ;
+                      ; Prompt user to enter an 8-bit data byte and return it in 's2'.
+                      ; If user makes a mistake then keep prompting until they get it right!
+                      ;
+         obtain_data: LOAD sE, 2'd                      ;obtain 2-digit value
+                      CALL obtain_value                 ;8-bit value returned in sA
+                      LOAD s2, sA                       ;return data in s2
+                      RETURN 
+                      ;
+                      ;------------------------------------------------------------------------------------------
+                      ; Obtain 24-bit address from user
+                      ;------------------------------------------------------------------------------------------
+                      ;
+   obtain_address: LOAD sE, 6'd                      ;obtain 6-digit value
+                      CALL obtain_value                 ;24-bit value returned in [sC,sB,sA]
+                     LOAD s9, sC                       ;return address in [s9,s8,s7]
+                      LOAD s8, sB
+                      LOAD s7, sA
+                      RETURN 
+                      ;
+                      ;------------------------------------------------------------------------------------------
+                      ; Read ASCII-HEX value up to 8-digits (for 32-bit value) from UART
+                      ;------------------------------------------------------------------------------------------
+                      ;
+                      ; Read up to 8 hex characters from UART and convert to a binary value in the [sD,sC,sB,sA]
+                      ; register set. The number of characters to be read must be defined in sE. When less than
+                      ; 8 characters are read the value is returned in the least significant bits of the register
+                      ; set with the 8-bits above the defined value being zero to ensure ensuring that the upper
+                      ; nibble will be zero if an odd number of digits are read.
+                      ;
+                      ; If any character received from the UART is not in the range 0 to F then the routine will
+                      ; end immediately with the CARRY flag set and this should be checked my the calling process
+                      ; upon return.
+                      ;
+        obtain_value: LOAD sA, 00                       ;initialise potentially unused bits to zero
+        obtain_digit: CALL UART_RX                      ;wait for a character and return in s5
+                      JUMP Z, obtain_digit              ;continue to wait if timeout occurs
+                      CALL UART_TX
+                      CALL upper_case                   ;convert to upper case if necessary
+                      CALL ASCII_to_hex                 ;convert value in s5 to hex nibble
+                      RETURN C                          ;If invalid hex digit then return immediately
+                      LOAD s0, 4'd                      ;shift [sD,sC,sB,sA] left by 4 bits
+         build_value: SL0 sA                            ;  to make space for new digit value
+                      SLA sB
+                      SLA sC
+                      SLA sD
+                      SUB s0, 1'd
+                      JUMP NZ, build_value
+                      OR sA, s5                         ;merge value of new digit into existing value
+                      SUB sE, 01                        ;count number of digits obtained
+                      JUMP NZ, obtain_digit
+                      RETURN 
+                      ;
+                      ;
+                      ;------------------------------------------------------------------------------------------
+                      ; Converts character to upper case
+                      ;------------------------------------------------------------------------------------------
+                      ;
+                      ; Tests and converts character in 's5' (if necessary).
+                      ;
+                      ; To convert character to upper case
+                      ;
+                      ; If the character is in the range 'a' to 'z', it is converted
+                      ; to the equivalent upper case character in the range 'A' to 'Z'.
+                      ; All other characters remain unchanged.
+                      ;
+          upper_case: COMPARE s5, "a"                   ;eliminate character codes below 'a' (61 hex)
+                      RETURN C
+                      COMPARE s5, 7B                    ;eliminate character codes above 'z' (7A hex)
+                      RETURN NC
+                      AND s5, 11011111'b                ;force bit5 Low to convert to upper case
+                      RETURN 
+                      ;
+                      ;
+                      ;------------------------------------------------------------------------------------------
+                      ; Convert ASCII character to an equivalent HEX value.
+                      ;------------------------------------------------------------------------------------------
+                      ;
+                      ; Converts the ASCII character presented in 's5' to an equivalent HEX value.
+                      ; If character is not valid for hex, then CARRY is set on return.
+                      ;
+                      ; Register used s5
+                      ;
+        ASCII_to_hex: ADD s5, B9                        ;test for above ASCII code 46 ('F')
+                      RETURN C
+                      SUB s5, E9                        ;normalise 0 to 9 with A-F in 11 to 16 hex
+                      RETURN C                          ;reject below ASCII code 30 ('0')
+                      SUB s5, 11                        ;isolate A-F down to 00 to 05 hex
+                      JUMP NC, ASCII_letter
+                      ADD s5, 07                        ;test for above ASCII code 46 ('F')
+                      RETURN C
+                      SUB s5, F6                        ;convert to range 00 to 09
+                      RETURN 
+        ASCII_letter: ADD s5, 0A                        ;convert to range 0A to 0F
+                      RETURN 
+                      ;
+                      ;
+                      ;------------------------------------------------------------------------------------------
+                      ; Send Hex Value of Byte to UART
+                      ;------------------------------------------------------------------------------------------
+                      ;
+                      ; Value provided in register 's4' is sent as ASCII HEX to the UART transmitter.
+                      ;
+                      ; Registers used s0, s4 (preserved) and s5.
+                      ;
+       send_hex_byte: LOAD s5, s4                       ;isolate upper nibble
+                      SR0 s5
+                      SR0 s5
+                      SR0 s5
+                      SR0 s5
+                      CALL hex_to_ASCII                 ; convert to ASCII
+                      CALL UART_TX                      ;send upper digit to UART
+                      LOAD s5, s4                       ;isolate lower nibble
+                      AND s5, 0F
+                      CALL hex_to_ASCII                 ; convert to ASCII
+                      CALL UART_TX                      ;send lower digit to UART
+                      RETURN 
+                      ;
+                      ; Convert value 00 to 0F provided in 's5' into ASCII character in 's5'
+                      ;
+                      ; Register used s5
+                      ;
+        hex_to_ASCII: SUB s5, 0A                        ;test if value is in range 0 to 9
+                      JUMP C, number_char
+                      ADD s5, 07                        ;ASCII char A to F in range 41 to 46
+         number_char: ADD s5, 3A                        ;ASCII char 0 to 9 in range 30 to 40
+                      RETURN 
+                      ;
+                      ;
+                      ;------------------------------------------------------------------------------------------
+                    ; Send a message to the UART
+                    ;------------------------------------------------------------------------------------------
+                    ;
+                    ; A message is transmitted to the USB-UART.
+                    ; The start address of the message must be provided in [sB,sA].
+                    ; Terminate the transmission with a NULL character (00 hex).
+                    ;
+      send_message: CALL@ (sB, sA)
+                    COMPARE s5, 00                  ;terminate on NUL character
+                    RETURN Z
+                    CALL UART_TX
+                    ADD sA, 1'd
+                    ADDCY sB, 0'd
+                    JUMP send_message
+                    ;
+                    ;
+                    
+                    ;------------------------------------------------------------------------------------------
+                    ; Send Carriage Return to UART
+                    ;------------------------------------------------------------------------------------------
+                    ;
+                    ; Registers used s0, s1, s2, and s5.
+                    ;
+           send_CR: LOAD s5, CR
+                    JUMP UART_TX                    ;includes RETURN
+                    ;
+                    ;
+      PicoTerm_CLS: CALL start_escape_sequence
+                         LOAD s5, "2"
+                         CALL UART_TX
+                         LOAD s5, "J"
+                         CALL UART_TX                              ;includes RETURN
+                         ;
+  start_escape_sequence: LOAD s5, ESC
+                         CALL UART_TX
+                         LOAD s5, "["
+                         CALL UART_TX
+                         RETURN 
+                        ; 
+                    ;------------------------------------------------------------------------------------------
+                    ; Send a Space to UART
+                    ;------------------------------------------------------------------------------------------
+                    ;
+                    ; Registers used s0, s1, s2, and s5.
+                    ;
+        send_space: LOAD s5, " "
+                    JUMP UART_TX                    ;includes RETURN
+                    ;
+                      ;------------------------------------------------------------------------------------------
+                      ; Welcome Message.
+                      ;------------------------------------------------------------------------------------------
+                      ;
+                      ; The welcome message includes a display of the version information available from the
+                      ; assembler and the 'hwbuild' from the instantiation of KCPSM6 in the hardware design.
+                      ;
+     welcome_message: LOAD sB, welcome_msg'upper
+                      LOAD sA, welcome_msg'lower
+                      CALL send_message
+                      HWBUILD s5                        ;hardware version defines ASCII letter
+                      CALL UART_TX
+                      CALL send_CR
+                      RETURN 
+                      ;
+                      ; Welcome message
+                      ;
+                      STRING banner1$, "  _  ______ ____  ____  __  __  __"
+                      STRING banner2$, " | |/ / ___|  _ \/ ___||  \/  |/ /_"
+                      STRING banner3$, " | ' / |   | |_) \___ \| |\/| | '_ \"
+                      STRING banner4$, " | . \ |___|  __/ ___) | |  | | (_) )"
+                      STRING banner5$, " |_|\_\____|_|   |____/|_|  |_|\___/"
+                      ;
+                      ;
+         welcome_msg: LOAD&RETURN s5, banner1$
+                      LOAD&RETURN s5, CR
+                      LOAD&RETURN s5, banner2$
+                      LOAD&RETURN s5, CR
+                      LOAD&RETURN s5, banner3$
+                      LOAD&RETURN s5, CR
+                      LOAD&RETURN s5, banner4$
+                      LOAD&RETURN s5, CR
+                      LOAD&RETURN s5, banner5$
+                      LOAD&RETURN s5, CR
+                      LOAD&RETURN s5, NUL
+                      ;
+                      ;
+                       ;------------------------------------------------------------------------------------------
+                      ; Routine to transmit a simple 'Menu'.
+                      ;------------------------------------------------------------------------------------------
+                      ;
+        display_menu: LOAD sB, menu_msg'upper
+                      LOAD sA, menu_msg'lower
+                      CALL send_message
+                      RETURN 
+                      ;
+                      ; Menu message
+                      ;
+                      STRING menu1$, "Menu"
+                      STRING menu2$, " H - Display this menu"
+                      STRING menu3$, " R - Read (BYTE)"
+                      STRING menu4$, " W - Write (FILE)"
+                      STRING menu5$, " E - Erase (Sector)"
+                      STRING menu6$, " D - Data (INPUT)"
+                      STRING menu7$, " O - Output LOG"
+                      STRING menu8$, " L - LOOKUP"
+                      ;
+            menu_msg: LOAD&RETURN s5, CR
+                      LOAD&RETURN s5, CR
+                      LOAD&RETURN s5, menu1$
+                      LOAD&RETURN s5, CR
+                      LOAD&RETURN s5, menu2$
+                      LOAD&RETURN s5, CR
+                      LOAD&RETURN s5, menu3$
+                      LOAD&RETURN s5, CR
+                      LOAD&RETURN s5, menu4$
+                      LOAD&RETURN s5, CR
+                      LOAD&RETURN s5, menu5$
+                      LOAD&RETURN s5, CR
+                      LOAD&RETURN s5, menu6$
+                      LOAD&RETURN s5, CR
+                      LOAD&RETURN s5, menu7$
+                      LOAD&RETURN s5, CR
+                      LOAD&RETURN s5, menu8$
+                      LOAD&RETURN s5, CR
+                      LOAD&RETURN s5, NUL
+                      ;
+                      ;
+                     ; ------------------------------------------------------------------------------------
+                         ; Routines to transmit 'DCS' and 'ST' characters
+                         ;--------------------------------------------------------------------------------------
+                         ;
+                         ; Registers used s0 and s5.
+                         ;
+                         ; 'DCS' (90 hex = 144).
+                         ;
+               send_DCS: LOAD s5, DCS
+                         JUMP UART_TX                              ;includes RETURN
+                         ;
+                         ; 'ST' (9C hex = 156).
+                         ;
+                send_ST: LOAD s5, ST
+                         JUMP UART_TX                              ;includes RETURN
+                         ;
+                         ;
+                         ;
+                      ;------------------------------------------------------------------------------------------
+                    ; Include PSM files
+                    ;------------------------------------------------------------------------------------------
+                    ;
+                    ; The INCLUDE directive enables commonly routines to be kept in their own PSM files and
+                    ; easily reused in different programs (i.e. avoiding 'cut and paste'). It also allows
+                    ; each PSM to remain a more manageable size.
+                    ;
+                    ;
+                    ; Include routines that implement interface with UART macros.
+                    ; -----------------------------------------------------------
+                    ;
+                    INCLUDE "uart_interface_routines.psm"
+                    ;
+                    ; SPI communication with Micron/Numonyx N25Q128 device
+                      ; ----------------------------------------------------
+                      ;
+                      INCLUDE "N25Q128_SPI_routines.psm"
+                      ;
+                      INCLUDE "soft_delays_100mhz.psm"
+                    ;------------------------------------------------------------------------------------------
+                    ; End of Program
+                    ;------------------------------------------------------------------------------------------
+                    ;

@@ -1,6 +1,6 @@
 //
 ///////////////////////////////////////////////////////////////////////////////////////////
-// Copyright © 2010-2013, Xilinx, Inc.
+// Copyright Â© 2010-2013, Xilinx, Inc.
 // This file contains confidential and proprietary information of Xilinx, Inc. and is
 // protected under U.S. and international copyright and other intellectual property laws.
 ///////////////////////////////////////////////////////////////////////////////////////////
@@ -75,7 +75,7 @@ The next line is used to determine where the template actually starts.
 {begin template}
 //
 ///////////////////////////////////////////////////////////////////////////////////////////
-// Copyright © 2010-2013, Xilinx, Inc.
+// Copyright Â© 2010-2013, Xilinx, Inc.
 // This file contains confidential and proprietary information of Xilinx, Inc. and is
 // protected under U.S. and international copyright and other intellectual property laws.
 ///////////////////////////////////////////////////////////////////////////////////////////
